@@ -103,10 +103,19 @@ impl tracing::field::Visit for JsonFieldVisitor {
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.fields.insert(
-            field.name().to_string(),
-            Value::String(format!("{value:?}")),
-        );
+        let rendered = format!("{value:?}");
+        if field.name() == "message" {
+            let normalized = rendered
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(&rendered)
+                .to_string();
+            self.message = Some(normalized);
+            return;
+        }
+
+        self.fields
+            .insert(field.name().to_string(), Value::String(rendered));
     }
 }
 

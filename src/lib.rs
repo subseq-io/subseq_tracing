@@ -26,7 +26,10 @@ pub use diagnostics::{
 };
 pub use layer::DiagnosticsLayer;
 pub use scope::{Scope, with_scope};
-pub use transport::{DiagnosticsTransport, MemoryTransport, NoopTransport, TransportError};
+pub use transport::{
+    DiagnosticsTransport, HttpTransport, HttpTransportOptions, MemoryTransport, NoopTransport,
+    TransportError,
+};
 
 /// Create a tracing layer that forwards warn/error events into diagnostics capture.
 pub fn diagnostics_layer() -> DiagnosticsLayer {

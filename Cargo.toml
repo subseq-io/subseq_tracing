@@ -15,7 +15,9 @@ thiserror = "2.0"
 tracing = "0.1.44"
 tracing-opentelemetry = "0.29.0"
 tracing-subscriber = { version = "0.3.20", features = ["registry"] }
+ureq = { version = "2.12.1", features = ["json"] }
 uuid = { version = "1.20.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
 anyhow = "1.0"
+serial_test = "3.2.0"

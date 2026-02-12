@@ -244,10 +244,7 @@ pub fn capture_error_message(message: impl Into<String>) -> Uuid {
 
 pub fn capture_error(error: &(dyn Error + 'static)) -> Uuid {
     let mut fields = Map::new();
-    fields.insert(
-        "errorChain".to_string(),
-        Value::String(format!("{error:#}")),
-    );
+    fields.insert("errorChain".to_string(), Value::String(error_chain(error)));
 
     capture_message_with_fields(
         DiagnosticLevel::Error,
@@ -255,6 +252,19 @@ pub fn capture_error(error: &(dyn Error + 'static)) -> Uuid {
         error.to_string(),
         fields,
     )
+}
+
+fn error_chain(error: &(dyn Error + 'static)) -> String {
+    let mut parts = Vec::new();
+    parts.push(error.to_string());
+
+    let mut current = error.source();
+    while let Some(source) = current {
+        parts.push(source.to_string());
+        current = source.source();
+    }
+
+    parts.join(": ")
 }
 
 pub fn capture_message_with_fields(
