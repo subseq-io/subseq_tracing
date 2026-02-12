@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -8,7 +10,7 @@ use chrono::Utc;
 use serde_json::json;
 use subseq_tracing::{
     DiagnosticEvent, DiagnosticKind, DiagnosticLevel, DiagnosticPackage, DiagnosticsTransport,
-    HttpTransport, HttpTransportOptions, ScopeSnapshot, TransportError,
+    HttpTransport, HttpTransportOptions, ScopeSnapshot, TransportError, WorkloadJwtProvider,
 };
 use uuid::Uuid;
 
@@ -18,6 +20,32 @@ struct CapturedRequest {
     path: String,
     headers: BTreeMap<String, String>,
     body: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct CountingTokenProvider {
+    token: String,
+    calls: AtomicUsize,
+}
+
+impl CountingTokenProvider {
+    fn new(token: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl WorkloadJwtProvider for CountingTokenProvider {
+    fn workload_jwt(&self) -> Result<String, TransportError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.token.clone())
+    }
 }
 
 #[test]
@@ -42,10 +70,11 @@ fn http_transport_sends_expected_headers_and_payload() {
 
     let mut options = HttpTransportOptions {
         endpoint,
-        bearer_token: Some("test-workload-token".to_string()),
+        workload_jwt: Some("test-workload-token".to_string()),
         timeout: Duration::from_secs(2),
         user_agent: "subseq-tracing-test/1.0".to_string(),
         headers: BTreeMap::new(),
+        ..HttpTransportOptions::default()
     };
     options
         .headers
@@ -81,6 +110,64 @@ fn http_transport_sends_expected_headers_and_payload() {
     let decoded: DiagnosticPackage =
         serde_json::from_slice(&request.body).expect("payload should decode");
     assert_eq!(decoded, package);
+}
+
+#[test]
+fn http_transport_supports_workload_jwt_provider() {
+    let (endpoint, handle) = spawn_one_shot_server("200 OK", r#"{"ok":true}"#);
+    let provider = Arc::new(CountingTokenProvider::new("token-from-provider"));
+
+    let transport = HttpTransport::new(HttpTransportOptions {
+        endpoint,
+        workload_jwt_provider: Some(provider.clone()),
+        timeout: Duration::from_secs(2),
+        ..HttpTransportOptions::default()
+    })
+    .expect("http transport should build");
+
+    transport
+        .send(fixture_package())
+        .expect("send should succeed");
+
+    let request = handle.join().expect("server thread should join");
+    assert_eq!(
+        request.headers.get("authorization"),
+        Some(&"Bearer token-from-provider".to_string())
+    );
+    assert_eq!(provider.calls(), 1);
+}
+
+#[test]
+fn http_transport_rejects_mixed_provider_and_static_token() {
+    let provider: Arc<dyn WorkloadJwtProvider> = Arc::new(|| Ok("token-from-provider".to_string()));
+
+    let err = HttpTransport::new(HttpTransportOptions {
+        workload_jwt_provider: Some(provider),
+        workload_jwt: Some("static-token".to_string()),
+        ..HttpTransportOptions::default()
+    })
+    .expect_err("mixed token source should fail");
+
+    assert!(err.to_string().contains("cannot be combined"));
+}
+
+#[test]
+fn http_transport_surfaces_provider_errors() {
+    let provider: Arc<dyn WorkloadJwtProvider> =
+        Arc::new(|| Err(TransportError::Message("provider failure".to_string())));
+
+    let transport = HttpTransport::new(HttpTransportOptions {
+        endpoint: "http://127.0.0.1:9/ingest/diagnostics".to_string(),
+        workload_jwt_provider: Some(provider),
+        timeout: Duration::from_millis(100),
+        ..HttpTransportOptions::default()
+    })
+    .expect("http transport should build");
+
+    let err = transport
+        .send(fixture_package())
+        .expect_err("provider errors should surface");
+    assert!(err.to_string().contains("provider failure"));
 }
 
 #[test]

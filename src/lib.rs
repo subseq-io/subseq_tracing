@@ -8,6 +8,7 @@
 //! - `capture_message` / `capture_error`
 //! - panic hook support
 //! - tracing subscriber layer for warning/error events
+//! - workload JWT transport options for readysetapp ingest
 
 mod client;
 mod diagnostics;
@@ -28,7 +29,7 @@ pub use layer::DiagnosticsLayer;
 pub use scope::{Scope, with_scope};
 pub use transport::{
     DiagnosticsTransport, HttpTransport, HttpTransportOptions, MemoryTransport, NoopTransport,
-    TransportError,
+    TransportError, WorkloadJwtProvider,
 };
 
 /// Create a tracing layer that forwards warn/error events into diagnostics capture.

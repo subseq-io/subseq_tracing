@@ -54,6 +54,15 @@ let subscriber = tracing_subscriber::registry().with(diagnostics_layer());
 - `diagnostics_layer_with_min_level(..)` can be used to include info/debug.
 - `flush()` sends buffered events via the configured transport.
 
+## Workload JWT Pattern (readysetapp ingest)
+
+- Use the readysetapp endpoint: `/api/v1/monitoring/ingest/diagnostics`.
+- Configure `HttpTransportOptions.workload_jwt` (or `workload_jwt_provider`) for machine ingest auth.
+- Register workload identities in readysetapp with selector combinations that match JWT claims:
+  - required: `issuer` + (`clientId` or `subject`)
+  - optional: `audience`
+- For Cognito-style rotation, prefer `workload_jwt_provider` so each send can fetch a fresh token.
+
 ## Transport
 
 Implement `DiagnosticsTransport` to send packages to a backend.
