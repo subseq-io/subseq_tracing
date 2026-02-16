@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -76,6 +77,11 @@ pub struct HttpTransportOptions {
     pub workload_jwt_provider: Option<Arc<dyn WorkloadJwtProvider>>,
     // Backward compatibility with older callers. Prefer workload_jwt.
     pub bearer_token: Option<String>,
+    /// Optional root CA bundle for HTTPS endpoints (PEM encoded).
+    ///
+    /// This is primarily intended for in-cluster dev where readysetapp uses a cert-manager
+    /// cluster CA, and workloads must trust that CA when sending diagnostics over HTTPS.
+    pub ca_cert_pem_path: Option<PathBuf>,
     pub timeout: Duration,
     pub user_agent: String,
     pub headers: BTreeMap<String, String>,
@@ -106,6 +112,7 @@ impl std::fmt::Debug for HttpTransportOptions {
                     .as_ref()
                     .map(|_| "<redacted bearer token>"),
             )
+            .field("ca_cert_pem_path", &self.ca_cert_pem_path)
             .field("timeout", &self.timeout)
             .field("user_agent", &self.user_agent)
             .field("headers", &self.headers)
@@ -120,6 +127,7 @@ impl Default for HttpTransportOptions {
             workload_jwt: None,
             workload_jwt_provider: None,
             bearer_token: None,
+            ca_cert_pem_path: None,
             timeout: Duration::from_secs(5),
             user_agent: format!("subseq_tracing/{}", env!("CARGO_PKG_VERSION")),
             headers: BTreeMap::new(),
@@ -165,7 +173,53 @@ impl HttpTransport {
             }
         }
 
-        let agent = ureq::AgentBuilder::new().timeout(options.timeout).build();
+        let mut agent_builder = ureq::AgentBuilder::new().timeout(options.timeout);
+        if options.endpoint.starts_with("https://") {
+            if let Some(ca_path) = options.ca_cert_pem_path.as_ref() {
+                let mut root_store = rustls::RootCertStore {
+                    roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+                };
+
+                let pem = std::fs::read(ca_path).map_err(|err| {
+                    TransportError::Message(format!(
+                        "failed to read ca cert pem at {}: {err}",
+                        ca_path.display()
+                    ))
+                })?;
+
+                let certs = rustls_pemfile::certs(&mut &pem[..])
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|err| {
+                        TransportError::Message(format!(
+                            "invalid ca cert pem at {}: {err}",
+                            ca_path.display()
+                        ))
+                    })?;
+
+                if certs.is_empty() {
+                    return Err(TransportError::Message(format!(
+                        "ca cert pem at {} did not contain any certificates",
+                        ca_path.display()
+                    )));
+                }
+
+                for cert in certs {
+                    root_store.add(cert).map_err(|err| {
+                        TransportError::Message(format!(
+                            "invalid ca cert in {}: {err}",
+                            ca_path.display()
+                        ))
+                    })?;
+                }
+
+                let tls_config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth();
+                agent_builder = agent_builder.tls_config(Arc::new(tls_config));
+            }
+        }
+
+        let agent = agent_builder.build();
 
         Ok(Self { options, agent })
     }

@@ -13,6 +13,7 @@
 mod client;
 mod diagnostics;
 mod layer;
+mod oauth;
 mod scope;
 mod transport;
 
@@ -26,7 +27,11 @@ pub use diagnostics::{
     TraceContext, UserContext,
 };
 pub use layer::DiagnosticsLayer;
-pub use scope::{Scope, with_scope};
+pub use oauth::{
+    CognitoClientCredentialsJwtProvider, OAuthClientCredentialsJwtProvider,
+    OAuthClientCredentialsJwtProviderOptions,
+};
+pub use scope::{Scope, with_scope, with_scope_async};
 pub use transport::{
     DiagnosticsTransport, HttpTransport, HttpTransportOptions, MemoryTransport, NoopTransport,
     TransportError, WorkloadJwtProvider,
