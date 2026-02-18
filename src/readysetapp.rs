@@ -21,7 +21,7 @@ const ENV_WORKLOAD_CLIENT_ID: &str = "READYSETAPP_WORKLOAD_CLIENT_ID";
 const ENV_WORKLOAD_CLIENT_SECRET: &str = "READYSETAPP_WORKLOAD_CLIENT_SECRET";
 const ENV_WORKLOAD_SCOPES: &str = "READYSETAPP_WORKLOAD_SCOPES";
 const ENV_CA_CERT_PEM_PATH: &str = "READYSETAPP_CA_CERT_PEM_PATH";
-const ENV_LOG_PUMP_MIN_LEVEL: &str = "READYSETAPP_DIAGNOSTICS_LOG_PUMP_MIN_LEVEL";
+const ENV_RUST_LOG: &str = "RUST_LOG";
 
 const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -33,10 +33,6 @@ pub enum ReadysetappDiagnosticsEnvError {
     EmptyEnv(&'static str),
     #[error("{0} is required when {1} is set")]
     MissingRequiredEnv(&'static str, &'static str),
-    #[error(
-        "invalid {0} value '{1}'; expected one of debug|info|warning|warn|error|fatal|critical"
-    )]
-    InvalidEnumValue(&'static str, String),
     #[error("invalid readysetapp workload oauth config: {0}")]
     InvalidOAuth(#[source] TransportError),
     #[error("invalid readysetapp diagnostics transport config: {0}")]
@@ -46,7 +42,7 @@ pub enum ReadysetappDiagnosticsEnvError {
 /// Build a diagnostics layer for tracing log pump capture.
 ///
 /// Env:
-/// - `READYSETAPP_DIAGNOSTICS_LOG_PUMP_MIN_LEVEL` (optional, default: `warning`)
+/// - `RUST_LOG` (optional, defaults to `info` when unset or unparsable)
 pub fn diagnostics_layer_from_env() -> Result<DiagnosticsLayer, ReadysetappDiagnosticsEnvError> {
     let min_level = read_log_pump_min_level()?;
     Ok(DiagnosticsLayer::new(min_level))
@@ -131,26 +127,57 @@ pub fn init_from_env() -> Result<Option<ClientInitGuard>, ReadysetappDiagnostics
 }
 
 fn read_log_pump_min_level() -> Result<DiagnosticLevel, ReadysetappDiagnosticsEnvError> {
-    let Some(raw) = read_non_empty_optional_env(ENV_LOG_PUMP_MIN_LEVEL)? else {
+    let Some(raw) = read_non_empty_optional_env(ENV_RUST_LOG)? else {
         return Ok(DiagnosticLevel::Info);
     };
-    parse_diagnostic_level(ENV_LOG_PUMP_MIN_LEVEL, &raw)
+    Ok(parse_rust_log_min_level(&raw))
 }
 
-fn parse_diagnostic_level(
-    key: &'static str,
-    raw: &str,
-) -> Result<DiagnosticLevel, ReadysetappDiagnosticsEnvError> {
+fn parse_rust_log_min_level(raw: &str) -> DiagnosticLevel {
+    let mut min_level: Option<DiagnosticLevel> = None;
+    for directive in raw.split(',') {
+        let trimmed = directive.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let level_token = trimmed
+            .rsplit_once('=')
+            .map(|(_, rhs)| rhs.trim())
+            .unwrap_or(trimmed);
+
+        let Some(level) = parse_diagnostic_level(level_token) else {
+            continue;
+        };
+
+        min_level = Some(match min_level {
+            Some(current) if diagnostic_level_rank(current) <= diagnostic_level_rank(level) => {
+                current
+            }
+            _ => level,
+        });
+    }
+
+    min_level.unwrap_or(DiagnosticLevel::Info)
+}
+
+fn parse_diagnostic_level(raw: &str) -> Option<DiagnosticLevel> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "debug" => Ok(DiagnosticLevel::Debug),
-        "info" => Ok(DiagnosticLevel::Info),
-        "warning" | "warn" => Ok(DiagnosticLevel::Warning),
-        "error" => Ok(DiagnosticLevel::Error),
-        "fatal" | "critical" => Ok(DiagnosticLevel::Fatal),
-        _ => Err(ReadysetappDiagnosticsEnvError::InvalidEnumValue(
-            key,
-            raw.to_string(),
-        )),
+        "trace" | "debug" => Some(DiagnosticLevel::Debug),
+        "info" => Some(DiagnosticLevel::Info),
+        "warning" | "warn" => Some(DiagnosticLevel::Warning),
+        "error" => Some(DiagnosticLevel::Error),
+        "fatal" | "critical" | "off" => Some(DiagnosticLevel::Fatal),
+        _ => None,
+    }
+}
+
+fn diagnostic_level_rank(level: DiagnosticLevel) -> u8 {
+    match level {
+        DiagnosticLevel::Debug => 10,
+        DiagnosticLevel::Info => 20,
+        DiagnosticLevel::Warning => 30,
+        DiagnosticLevel::Error => 40,
+        DiagnosticLevel::Fatal => 50,
     }
 }
 
@@ -192,10 +219,10 @@ fn read_non_empty_optional_env(
 #[cfg(test)]
 mod tests {
     use super::{
-        ENV_DIAGNOSTICS_ENDPOINT, ENV_ENVIRONMENT, ENV_LOG_PUMP_MIN_LEVEL, ENV_PROJECT_SLUG,
+        ENV_DIAGNOSTICS_ENDPOINT, ENV_ENVIRONMENT, ENV_PROJECT_SLUG, ENV_RUST_LOG,
         ENV_WORKLOAD_CLIENT_ID, ENV_WORKLOAD_CLIENT_SECRET, ENV_WORKLOAD_TOKEN_URL,
         ReadysetappDiagnosticsEnvError, diagnostics_options_from_env, parse_diagnostic_level,
-        parse_scopes, read_log_pump_min_level,
+        parse_rust_log_min_level, parse_scopes, read_log_pump_min_level,
     };
     use serial_test::serial;
 
@@ -248,10 +275,19 @@ mod tests {
 
     #[test]
     fn parse_diagnostic_level_accepts_aliases() {
-        let warning = parse_diagnostic_level("LEVEL", "warn").expect("warn should parse");
-        let critical = parse_diagnostic_level("LEVEL", "critical").expect("critical should parse");
+        let warning = parse_diagnostic_level("warn").expect("warn should parse");
+        let critical = parse_diagnostic_level("critical").expect("critical should parse");
         assert!(matches!(warning, super::DiagnosticLevel::Warning));
         assert!(matches!(critical, super::DiagnosticLevel::Fatal));
+    }
+
+    #[test]
+    fn parse_rust_log_min_level_prefers_lowest_enabled_level() {
+        let level = parse_rust_log_min_level("scopestimate=debug,info");
+        assert!(matches!(level, super::DiagnosticLevel::Debug));
+
+        let level = parse_rust_log_min_level("warn,sqlx=error");
+        assert!(matches!(level, super::DiagnosticLevel::Warning));
     }
 
     #[test]
@@ -309,19 +345,16 @@ mod tests {
     #[test]
     #[serial]
     fn log_pump_level_defaults_to_info() {
-        let _guard = EnvGuard::set(&[(ENV_LOG_PUMP_MIN_LEVEL, None)]);
+        let _guard = EnvGuard::set(&[(ENV_RUST_LOG, None)]);
         let level = read_log_pump_min_level().expect("default level should parse");
         assert!(matches!(level, super::DiagnosticLevel::Info));
     }
 
     #[test]
     #[serial]
-    fn log_pump_level_rejects_invalid_value() {
-        let _guard = EnvGuard::set(&[(ENV_LOG_PUMP_MIN_LEVEL, Some("verbose"))]);
-        let err = read_log_pump_min_level().expect_err("invalid level should fail");
-        assert!(matches!(
-            err,
-            ReadysetappDiagnosticsEnvError::InvalidEnumValue(ENV_LOG_PUMP_MIN_LEVEL, _)
-        ));
+    fn log_pump_level_uses_rust_log_directives() {
+        let _guard = EnvGuard::set(&[(ENV_RUST_LOG, Some("code_sorcery=debug,info"))]);
+        let level = read_log_pump_min_level().expect("RUST_LOG should parse");
+        assert!(matches!(level, super::DiagnosticLevel::Debug));
     }
 }

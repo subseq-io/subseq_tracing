@@ -83,7 +83,7 @@ Supported env:
 - `READYSETAPP_WORKLOAD_CLIENT_SECRET`
 - `READYSETAPP_WORKLOAD_SCOPES` (optional, comma/whitespace-separated)
 - `READYSETAPP_CA_CERT_PEM_PATH` (optional)
-- `READYSETAPP_DIAGNOSTICS_LOG_PUMP_MIN_LEVEL` (optional: `debug|info|warning|warn|error|fatal|critical`, default `info`)
+- `RUST_LOG` (optional) is used to derive tracing log-pump minimum level automatically; default is `info` when unset.
 
 ## Workload JWT Pattern (readysetapp ingest)
 
