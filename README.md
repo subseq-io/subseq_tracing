@@ -61,6 +61,30 @@ let subscriber = tracing_subscriber::registry().with(diagnostics_layer());
 - `diagnostics_layer_with_min_level(..)` can be used to include info/debug.
 - `flush()` sends buffered events via the configured transport.
 
+## Readysetapp Env Bootstrap
+
+For service workloads that send diagnostics to readysetapp, use the env bootstrap helpers:
+
+```rust
+use subseq_tracing::readysetapp;
+
+let layer = readysetapp::diagnostics_layer_from_env()?;
+let _guard = readysetapp::init_from_env()?;
+```
+
+Supported env:
+- `READYSETAPP_DIAGNOSTICS_ENDPOINT` (set to enable diagnostics)
+- `READYSETAPP_PROJECT_SLUG`
+- `READYSETAPP_SERVICE_NAME` (optional; defaults to project slug)
+- `READYSETAPP_ENVIRONMENT`
+- `READYSETAPP_RELEASE` (optional)
+- `READYSETAPP_WORKLOAD_TOKEN_URL`
+- `READYSETAPP_WORKLOAD_CLIENT_ID`
+- `READYSETAPP_WORKLOAD_CLIENT_SECRET`
+- `READYSETAPP_WORKLOAD_SCOPES` (optional, comma/whitespace-separated)
+- `READYSETAPP_CA_CERT_PEM_PATH` (optional)
+- `READYSETAPP_DIAGNOSTICS_LOG_PUMP_MIN_LEVEL` (optional: `debug|info|warning|warn|error|fatal|critical`, default `warning`)
+
 ## Workload JWT Pattern (readysetapp ingest)
 
 - Use the readysetapp endpoint: `/api/v1/monitoring/ingest/diagnostics`.

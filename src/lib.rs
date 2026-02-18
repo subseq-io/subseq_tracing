@@ -14,6 +14,7 @@ mod client;
 mod diagnostics;
 mod layer;
 mod oauth;
+pub mod readysetapp;
 mod scope;
 mod transport;
 
