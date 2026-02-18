@@ -132,7 +132,7 @@ pub fn init_from_env() -> Result<Option<ClientInitGuard>, ReadysetappDiagnostics
 
 fn read_log_pump_min_level() -> Result<DiagnosticLevel, ReadysetappDiagnosticsEnvError> {
     let Some(raw) = read_non_empty_optional_env(ENV_LOG_PUMP_MIN_LEVEL)? else {
-        return Ok(DiagnosticLevel::Warning);
+        return Ok(DiagnosticLevel::Info);
     };
     parse_diagnostic_level(ENV_LOG_PUMP_MIN_LEVEL, &raw)
 }
@@ -308,10 +308,10 @@ mod tests {
 
     #[test]
     #[serial]
-    fn log_pump_level_defaults_to_warning() {
+    fn log_pump_level_defaults_to_info() {
         let _guard = EnvGuard::set(&[(ENV_LOG_PUMP_MIN_LEVEL, None)]);
         let level = read_log_pump_min_level().expect("default level should parse");
-        assert!(matches!(level, super::DiagnosticLevel::Warning));
+        assert!(matches!(level, super::DiagnosticLevel::Info));
     }
 
     #[test]
